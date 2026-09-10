@@ -1,0 +1,386 @@
+==== PAGE 1 ====
+2026年高教社杯全国大学生数学建模竞赛
+C题 微网与外部电网电力调控策略
+问题1 详细解答
+1. 问题分析
+问题1要求：在每天电价和小区负载相同、光伏发电功率预测已知的条件下，制定微网每天
+0:00的计划购电策略。要求：
+1. 微网提供的电能不低于小区负载；
+2. 储能设备在0:00和24:00的储电量相同；
+3. 以购电费用最小为目标；
+4. 给出指定时间段的购电量、充放电量及全天购电量和购电费。
+该问题是一个典型的单日线性规划问题。决策变量为每个时段的购电功率、充电功率、放电
+功率和储能电量。目标函数为全天购电费用最小。约束条件包括功率平衡、储能动态、储能
+容量、充放电功率限制以及初末储电量相等。
+2. 模型假设
+1. 附件1给出的电价、小区负载和光伏发电预测功率在当天0:00已知，且全天不变；
+2. 储能设备充放电效率均为90%，且充放电过程不随温度、老化等因素变化；
+3. 忽略微网内部线路损耗；
+4. 购电和售电均通过外部电网完成，不考虑微网向外部电网售电；
+5. 储能设备在同一时段内不会同时充电和放电；
+6. 时间间隔为10分钟，全天共144个时段；
+7. 光伏发电优先供负载使用，剩余电量可给储能充电，不足部分由外网购电或储能放电
+补充。
+3. 符号说明
+符号
+含义
+单位
+t
+时段编号，t=1,2,…,144
+—
+Δt
+时间间隔，Δt=1/6 h
+h
+ct
+第t时段电价
+元/kWh
+2026/9/10 22:51
+2026高教社杯 C题第一问解答
+file:///D:/download/deepseek_html_20260910_f80106.html
+1/8
+
+==== PAGE 2 ====
+Loadt
+第t时段小区负载功率
+kW
+PVt
+第t时段光伏发电预测功率
+kW
+Ptbuy
+第t时段计划购电功率
+kW
+Pt
+ch
+第t时段储能充电功率
+kW
+Pt
+dis
+第t时段储能放电功率
+kW
+Et
+第t时段结束时的储能电量
+kWh
+E0
+0:00初始储能电量
+kWh
+ηc
+充电效率，取0.9
+—
+ηd
+放电效率，取0.9
+—
+Emax
+储能最大容量，12000 kWh
+kWh
+Emin
+储能最小容量，1200 kWh
+kWh
+Pmax
+最大充放电功率，5000 kW
+kW
+4. 数据预处理
+附件1给出从00:10到0:00+1的144个时间点，时间间隔10分钟。将时间点依次编号为
+t=1,2,…,144，其中：
+t=1 对应00:10；
+t=144 对应0:00+1，即24:00；
+E0表示0:00的储电量，E144表示24:00的储电量。
+全天购电量：
+Qtotal = Σt=1144 Ptbuy · Δt
+全天购电费：
+Ftotal = Σt=1144 ct · Ptbuy · Δt
+5. 数学模型
+5.1 决策变量
+2026/9/10 22:51
+2026高教社杯 C题第一问解答
+file:///D:/download/deepseek_html_20260910_f80106.html
+2/8
+
+==== PAGE 3 ====
+Ptbuy ≥ 0,   Ptch ≥ 0,   Ptdis ≥ 0,   Et ≥ 0,   t=1,2,…,144
+5.2 目标函数
+以全天购电费用最小为目标：
+min F = Σt=1144 ct Ptbuy Δt
+5.3 约束条件
+（1）功率平衡约束
+每个时段微网供电必须满足小区负载：
+Ptbuy + PVt + Ptdis = Loadt + Ptch,   t=1,…,144
+（2）储能动态约束
+考虑充放电效率，储能电量递推关系为：
+Et = Et-1 + ηc Ptch Δt − (Ptdis / ηd) Δt,   t=1,…,144
+其中 ηc=ηd=0.9，Δt=1/6 h。
+（3）储能容量约束
+Emin ≤ Et ≤ Emax,   t=1,…,144
+即：1200 ≤ Et ≤ 10800。
+（4）充放电功率约束
+0 ≤ Ptch ≤ Pmax,   0 ≤ Ptdis ≤ Pmax,   t=1,…,144
+其中 Pmax=5000 kW。
+（5）购电功率约束
+Ptbuy ≥ 0,   t=1,…,144
+（6）初末储电量约束
+E0 = 6000,   E144 = E0 = 6000
+（7）充放电互斥约束（可选）
+2026/9/10 22:51
+2026高教社杯 C题第一问解答
+file:///D:/download/deepseek_html_20260910_f80106.html
+3/8
+
+==== PAGE 4 ====
+为避免同一时段同时充放电，可引入二进制变量 ut∈{0,1}：
+0 ≤ Ptch ≤ Pmax ut,   0 ≤ Ptdis ≤ Pmax(1−ut)
+若采用线性规划，通常不需要该约束，因为同时充放电会因效率损失而增加成本，最优解不
+会同时充放电。
+6. 模型求解
+6.1 求解方法
+上述模型为线性规划（LP）模型。变量约 4×144=576 个，约束约 5×144=720 个，规模较
+小，可采用以下工具求解：
+Python：scipy.optimize.linprog、cvxpy、pulp
+MATLAB：linprog
+Excel：规划求解
+6.2 求解步骤
+1. 读取附件1中的电价 ct、负载 Loadt、光伏预测 PVt；
+2. 构造线性规划标准形式；
+3. 调用求解器求解；
+4. 提取 Ptbuy、Ptch、Ptdis、Et；
+5. 计算指定时间段购电量、充放电量、全天购电量和购电费；
+6. 将结果写入 result1.xlsx。
+6.3 Python 求解代码
+import pandas as pd
+import numpy as np
+from scipy.optimize import linprog
+# ========== 1. 读取附件1 ==========
+df = pd.read_excel('附件1.xlsx')
+# 假设列名依次为：时间、电价、小区负载、光伏发电预测功率
+df.columns = ['时间', '电价', '小区负载', '光伏发电预测功率']
+c = df['电价'].values.astype(float)
+Load = df['小区负载'].values.astype(float)
+PV = df['光伏发电预测功率'].values.astype(float)
+n = len(c)          # 144
+dt = 1/6            # 小时
+E0 = 6000.0         # 初始储电量 kWh
+Emax = 10800.0
+2026/9/10 22:51
+2026高教社杯 C题第一问解答
+file:///D:/download/deepseek_html_20260910_f80106.html
+4/8
+
+==== PAGE 5 ====
+Emin = 1200.0
+Pmax = 5000.0
+eta = 0.9
+# ========== 2. 构造线性规划 ==========
+# 决策变量顺序: P_buy(n), P_ch(n), P_dis(n), E(n)
+# 总变量数 4*n
+obj = np.zeros(4*n)
+obj[:n] = c * dt    # 目标：购电费用最小
+A_eq = []
+b_eq = []
+# 2.1 功率平衡: P_buy + PV + P_dis = Load + P_ch
+for t in range(n):
+    row = np.zeros(4*n)
+    row[t] = 1            # P_buy
+    row[n+t] = -1         # -P_ch
+    row[2*n+t] = 1        # P_dis
+    A_eq.append(row)
+    b_eq.append(Load[t] - PV[t])
+# 2.2 储能动态: E_t - E_{t-1} - eta*P_ch*dt + P_dis*dt/eta = 0
+for t in range(n):
+    row = np.zeros(4*n)
+    row[3*n+t] = 1        # E_t
+    if t > 0:
+        row[3*n+t-1] = -1 # -E_{t-1}
+    row[n+t] = -eta * dt          # -eta*P_ch*dt
+    row[2*n+t] = dt / eta         # +P_dis*dt/eta
+    A_eq.append(row)
+    if t == 0:
+        b_eq.append(E0)   # E_0 = 6000
+    else:
+        b_eq.append(0)
+# 2.3 末储电量 E_{n-1} = 6000
+row = np.zeros(4*n)
+row[3*n+n-1] = 1
+A_eq.append(row)
+b_eq.append(6000)
+A_ub = []
+b_ub = []
+# 2.4 充放电功率上限
+for t in range(n):
+    row = np.zeros(4*n)
+    row[n+t] = 1
+    A_ub.append(row); b_ub.append(Pmax)
+    row = np.zeros(4*n)
+    row[2*n+t] = 1
+    A_ub.append(row); b_ub.append(Pmax)
+2026/9/10 22:51
+2026高教社杯 C题第一问解答
+file:///D:/download/deepseek_html_20260910_f80106.html
+5/8
+
+==== PAGE 6 ====
+# 2.5 储能容量上下限
+for t in range(n):
+    row = np.zeros(4*n)
+    row[3*n+t] = 1
+    A_ub.append(row); b_ub.append(Emax)
+    row = np.zeros(4*n)
+    row[3*n+t] = -1
+    A_ub.append(row); b_ub.append(-Emin)
+# 变量下界
+bounds = [(0, None)] * n + [(0, Pmax)] * n + [(0, Pmax)] * n + [(Emin, Emax)] * n
+# ========== 3. 求解 ==========
+res = linprog(obj, A_ub=A_ub, b_ub=b_ub, A_eq=A_eq, b_eq=b_eq,
+              bounds=bounds, method='highs')
+if res.success:
+    x = res.x
+    P_buy = x[:n]
+    P_ch = x[n:2*n]
+    P_dis = x[2*n:3*n]
+    E = x[3*n:4*n]
+    total_buy = np.sum(P_buy) * dt
+    total_cost = np.sum(c * P_buy) * dt
+    print('全天购电量: %.4f kWh' % total_buy)
+    print('全天购电费: %.4f 元' % total_cost)
+    # ========== 4. 保存到 result1.xlsx ==========
+    with pd.ExcelWriter('result1.xlsx') as writer:
+        # 计划购电量
+        df_buy = pd.DataFrame({
+            '时间': df['时间'],
+            '购电量(kWh)': np.round(P_buy * dt, 4)
+        })
+        df_buy.to_excel(writer, sheet_name='计划购电量', index=False)
+        # 充放电量：按指定时间段汇总
+        periods = [(0,24), (24,48), (48,72), (72,96), (96,120), (120,144)]
+        period_names = ['0:00-4:00','4:00-8:00','8:00-12:00',
+                        '12:00-16:00','16:00-20:00','20:00-24:00']
+        rows = []
+        for (s, e), name in zip(periods, period_names):
+            ch = np.sum(P_ch[s:e]) * dt
+            dis = np.sum(P_dis[s:e]) * dt
+            rows.append([name, round(ch,4), round(dis,4)])
+        rows.append(['0:00储电量', round(E0,4), ''])
+        rows.append(['24:00储电量', round(E[-1],4), ''])
+        df_cd = pd.DataFrame(rows, columns=['时间段','充电量(kWh)','放电量(kWh)'])
+        df_cd.to_excel(writer, sheet_name='充放电量', index=False)
+    print('结果已保存至 result1.xlsx')
+2026/9/10 22:51
+2026高教社杯 C题第一问解答
+file:///D:/download/deepseek_html_20260910_f80106.html
+6/8
+
+==== PAGE 7 ====
+else:
+    print('求解失败:', res.message)
+7. 结果表示
+7.1 表1：微网在指定时间段的购电量及全天购电量和购电费
+时间段
+购电量/kWh
+时间段
+购电量/kWh
+时间段
+购电量/kWh
+10:00-10:10
+P60
+buy·Δt
+12:00-12:10
+P72
+buy·Δt
+14:00-14:10
+P84
+buy·Δt
+16:00-16:10
+P96
+buy·Δt
+18:00-18:10
+P108
+buy·Δt
+20:00-20:10
+P120
+buy·Δt
+全天购电量：Σt=1
+144 Pt
+buy·Δt
+全天购电费：Σt=1
+144 ct Pt
+buy·Δt
+注：P60buy 对应 10:00 时段，P72buy 对应 12:00 时段，依此类推。实际数值由程序运
+行得到。
+7.2 表2：储能设备在指定时间段的充放电量及0:00和24:00储电量
+时间段
+充电量/kWh
+放电量/kWh
+0:00-4:00
+Σt=1
+24 Pt
+ch·Δt
+Σt=1
+24 Pt
+dis·Δt
+4:00-8:00
+Σt=25
+48 Pt
+ch·Δt
+Σt=25
+48 Pt
+dis·Δt
+8:00-12:00
+Σt=49
+72 Pt
+ch·Δt
+Σt=49
+72 Pt
+dis·Δt
+12:00-16:00
+Σt=73
+96 Pt
+ch·Δt
+Σt=73
+96 Pt
+dis·Δt
+16:00-20:00
+Σt=97
+120 Pt
+ch·Δt
+Σt=97
+120 Pt
+dis·Δt
+20:00-24:00
+Σt=121
+144 Pt
+ch·Δt
+Σt=121
+144 Pt
+dis·Δt
+0:00储电量
+E0=6000
+—
+24:00储电量
+E144=6000
+—
+8. 结果保存
+将完整结果保存至 result1.xlsx：
+“计划购电量”工作表：A列为时间（00:10 至 0:00+1，共144行），B列为对应购电
+量（kWh），即 Ptbuy·Δt。
+2026/9/10 22:51
+2026高教社杯 C题第一问解答
+file:///D:/download/deepseek_html_20260910_f80106.html
+7/8
+
+==== PAGE 8 ====
+“充放电量”工作表：按表2格式保存各指定时间段的充电量、放电量，以及0:00和
+24:00储电量。
+所有结果保留四位小数。
+9. 模型检验
+1. 功率平衡检验：逐时段检查 Ptbuy+PVt+Ptdis=Loadt+Ptch 是否成立。
+2. 储能容量检验：检查 1200 ≤ Et ≤ 10800。
+3. 初末储电量检验：检查 E0=6000，E144=6000。
+4. 购电费用检验：检查全天购电费等于 Σ ct PtbuyΔt。
+5. 经济性分析：对比“无储能”情形，计算储能带来的费用节约。
+10. 结论
+问题1可建立为单日线性规划模型，以购电费用最小为目标，考虑功率平衡、储能动态、容
+量约束和初末储电量相等约束。利用 Python 或 MATLAB 可快速求解，得到全天144个时段
+的计划购电量和储能充放电策略。结果按表1 和表2 格式填入论文，并保存至
+result1.xlsx。
+—— 完 ——
+2026/9/10 22:51
+2026高教社杯 C题第一问解答
+file:///D:/download/deepseek_html_20260910_f80106.html
+8/8

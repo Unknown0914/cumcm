@@ -1,0 +1,105 @@
+	# 2026年高教社杯全国大学生数学建模竞赛 C题
+	## 问题1求解文档：微网单日计划购电策略模型
+	> 编制日期：2026年9月10日
+	> 内容：问题分析 → 符号说明 → 模型假设 → 模型建立 → 算法选择 → 完整代码 → 结果检验 → 格式要点
+	---
+	## 一、问题分析
+	问题1是**单日确定性优化**：已知全天 144 个 10 分钟时段的电价 πₜ、小区负载 Lₜ、光伏预测功率 vₜ（附件1），在每天 0:00 决策各时段的购电功率 pₜ 与储能充/放电功率 cₜ、fₜ，使购电费最小。需注意四个关键点：
+	1. **时标语义**：附件1时间戳（0:10, 0:20, …, 0:00+1）为**时段末端**，即第 t 行数据覆盖区间 ((t−1)·10min, t·10min]，Δt = 1/6 h；
+	2. **光伏可能过剩**：中午光伏峰值约 7600 kW 而负载仅约 5500 kW，盈余超出电池消纳能力时若无弃电通道模型不可行，故引入弃电（弃光）变量 dₜ 保证可行性；
+	3. **效率口径**：「充放电效率 90%」按行业标准建模为充、放两侧各 90%（往返效率 81%），论文中需做口径说明与敏感性分析；
+	4. **端点条件**：E(0:00) = E(24:00) = 6000 kWh。
+	## 二、符号说明
+	| 符号 | 含义 | 单位 |
+	|---|---|---|
+	| T = 144 | 时段数（10 min/时段） | — |
+	| Δt = 1/6 | 时段长度 | h |
+	| πₜ / Lₜ / vₜ | 电价 / 小区负载 / 光伏预测功率（附件1） | 元/kWh、kW、kW |
+	| pₜ / cₜ / fₜ / dₜ | 购电 / 充电 / 放电 / 弃电功率（决策变量） | kW |
+	| Eₜ | 第 t 时段末储电量（决策变量） | kWh |
+	| E₀ = 6000，E_min = 1200，E_max = 10800 | 初始电量与电量上下限（附录1） | kWh |
+	| P_max = 5000，η = 0.9 | 最大充放电功率、充放电效率（附录1） | kW、— |
+	## 三、模型假设
+	1. 时段内功率恒定（阶梯近似），电价、负载、光伏在时段内取附件1数值；
+	2. 不允许向电网售电（pₜ ≥ 0）；
+	3. 允许弃电/弃光且不产生费用（仅为保证可行性，最优解中弃电只可能出现在光伏过剩且电池无法消纳的时段）；
+	4. 效率 η 同时作用于充、放两侧（往返效率 η² = 81%），另做单侧口径敏感性分析；
+	5. 忽略网损等次要损耗；因往返效率 < 1，同时充放纯损耗能量，LP 最优解自动不出现同时充放（互补松弛，代码附带验证）。
+	## 四、模型建立（线性规划）
+	**目标函数**（全天购电费最小）：
+	  min Z = Σₜ₌₁¹⁴⁴ πₜ · pₜ · Δt
+	**约束条件**（∀t = 1,…,144）：
+	  (1) 供需平衡：      pₜ + vₜ + fₜ = Lₜ + cₜ + dₜ
+	  (2) 储量动态：      Eₜ = Eₜ₋₁ + η·cₜ·Δt − fₜ·Δt/η，  E₀ = 6000
+	  (3) 电量边界：      1200 ≤ Eₜ ≤ 10800
+	  (4) 功率限制：      0 ≤ cₜ ≤ 5000， 0 ≤ fₜ ≤ 5000
+	  (5) 非负性：        pₜ ≥ 0， dₜ ≥ 0
+	  (6) 端点条件：      E₁₄₄ = E₀ = 6000
+	## 五、算法选择：线性规划（PuLP + CBC 求解器）
+	变量 5×144 = 720 个、约束约 440 条，标准 LP，CBC 内点/对偶单纯形秒级求出全局最优。相比启发式（谷充峰放规则法），LP 能精确处理 SOC 边界、功率上限与端点条件的耦合，保证最优性——这就是本题的最优算法。若要求严格禁止同时充放，可升级为 MILP 加二元变量（默认 LP 解已满足，代码附带验证）。
+	## 六、完整代码（Python，可直接运行）
+	依赖安装：`pip install pandas numpy pulp openpyxl`
+	```python
+	# -*- coding: utf-8 -*-
+	"""2026 CUMCM C题 问题1：微网单日计划购电策略（LP）"""
+	import numpy as np, pandas as pd, pulp
+	# ---------- 1. 数据 ----------
+	df = pd.read_excel('附件1.xlsx')
+	df = df.rename(columns={df.columns[0]:'时间', df.columns[1]:'电价',
+	                        df.columns[2]:'负载', df.columns[3]:'光伏'})
+	pi = df['电价'].to_numpy(float); L = df['负载'].to_numpy(float)
+	v  = df['光伏'].to_numpy(float); T = len(df); dt = 1/6
+	E0, Emin, Emax, Pmax, eta = 6000.0, 1200.0, 10800.0, 5000.0, 0.90
+	# ---------- 2. LP模型 ----------
+	prob = pulp.LpProblem('C2026_Q1', pulp.LpMinimize)
+	p = [pulp.LpVariable(f'p{t}', lowBound=0) for t in range(T)]
+	c = [pulp.LpVariable(f'c{t}', lowBound=0, upBound=Pmax) for t in range(T)]
+	f = [pulp.LpVariable(f'f{t}', lowBound=0, upBound=Pmax) for t in range(T)]
+	d = [pulp.LpVariable(f'd{t}', lowBound=0) for t in range(T)]
+	E = [pulp.LpVariable(f'E{t}', lowBound=Emin, upBound=Emax) for t in range(T)]
+	prob += pulp.lpSum(pi[t]*p[t]*dt for t in range(T))          # 目标：购电费最小
+	for t in range(T):
+	    prob += p[t] + v[t] + f[t] == L[t] + c[t] + d[t]          # 供需平衡
+	    Ein = E0 if t == 0 else E[t-1]
+	    prob += E[t] == Ein + eta*c[t]*dt - f[t]*dt/eta           # 储量动态
+	prob += E[T-1] == E0                                           # 0:00与24:00储电量相同
+	prob.solve(pulp.PULP_CBC_CMD(msg=False)); Z = pulp.value(prob.objective)
+	# ---------- 3. 结果与自检 ----------
+	pv = np.array([x.value() for x in p]); cv = np.array([x.value() for x in c])
+	fv = np.array([x.value() for x in f]); dv = np.array([x.value() for x in d])
+	Ev = np.array([x.value() for x in E])
+	print('状态:', pulp.LpStatus[prob.status])
+	print(f'全天购电量={pv.sum()*dt:,.4f} kWh  全天购电费={Z:,.4f} 元')
+	print(f'弃电总量={dv.sum()*dt:,.4f} kWh；同时充放max(c·f)={(cv*fv).max():.2e}')
+	print(f'SOC范围[{Ev.min():.2f},{Ev.max():.2f}]，E24={Ev[-1]:.2f}')
+	# ---------- 4. 论文表1 ----------
+	slots = ['10:00-10:10','12:00-12:10','14:00-14:10','16:00-16:10','18:00-18:10','20:00-20:10']
+	idx = [60, 72, 84, 96, 108, 120]
+	tab1 = pd.DataFrame({'时间段':slots, '购电量(kWh)':np.round(pv[idx]*dt,4)})
+	tab1.loc[len(tab1)] = ['全天购电量(kWh)', round(pv.sum()*dt,4)]
+	tab1.loc[len(tab1)] = ['全天购电费(元)',  round(Z,4)]
+	print('\n表1\n', tab1.to_string(index=False))
+	# ---------- 5. 论文表2（每4小时=24个时段） ----------
+	bands = ['0:00-4:00','4:00-8:00','8:00-12:00','12:00-16:00','16:00-20:00','20:00-24:00']
+	rows = [[b, round(cv[i*24:(i+1)*24].sum()*dt,4), round(fv[i*24:(i+1)*24].sum()*dt,4)]
+	        for i, b in enumerate(bands)]
+	tab2 = pd.DataFrame(rows, columns=['时间段','充电量(kWh)','放电量(kWh)'])
+	tab2.loc[len(tab2)] = ['0:00 储电量', E0, '']
+	tab2.loc[len(tab2)] = ['24:00 储电量', round(Ev[-1],4), '']
+	print('\n表2\n', tab2.to_string(index=False))
+	# ---------- 6. 导出 result1.xlsx ----------
+	with pd.ExcelWriter('result1.xlsx', engine='openpyxl') as w:
+	    pd.DataFrame({'时间':df['时间'], '购电量':np.round(pv*dt,4)}
+	                 ).to_excel(w, sheet_name='计划购电量', index=False)
+	    tab2.to_excel(w, sheet_name='充放电量', index=False)
+	print('\nresult1.xlsx 已生成（请对照附件5模板核对列名与时间格式）')
+	```
+	## 七、结果检验要点（论文必写）
+	1. **可行性**：E₂₄ = 6000 精确成立；SOC 全程 ∈ [1200, 10800]；
+	2. **最优性**：LP 全局最优；若求和后 max(cₜ·fₜ) ≈ 0，证明无需 MILP 互补约束；
+	3. **弃电合理性**：若弃电总量为 0，可将 dₜ 固定为 0 重解验证结果一致；若 > 0，仅应出现在光伏过剩的中午时段；
+	4. **经济直觉核验**：策略应表现为「深夜低谷（约0.42元）充电、午间低价+光伏盈余充电、晚高峰（1.2–1.35元）放电」，与电价曲线对照绘图；
+	5. **敏感性分析（建议附表）**：效率改为单侧 90%（Eₜ = Eₜ₋₁ + 0.9cₜΔt − fₜΔt）时重解，对比购电费差异。
+	## 八、两个必须核对的格式细节
+	- **表1时段映射**：代码将"10:00-10:10"映射到数据行标签 10:10（附件1时标为时段末端）。若模板以 10:00 行起算，把 `idx` 改为 `[59, 71, 83, 95, 107, 119]`，务必对照附件5模板确认；
+	- **result1.xlsx 时间列**：默认沿用附件1格式（0:10 → 0:00+1），若模板用 0:00–23:50 起始，需平移一行。
